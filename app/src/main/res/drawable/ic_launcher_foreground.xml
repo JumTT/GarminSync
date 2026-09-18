@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 图标前景：同步环双箭头 + 心率折线，寓意运动数据在各账号间同步 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 同步环：右上四分之一弧（顺时针向下） -->
+    <path
+        android:pathData="M 54,37 A 17,17 0 0 1 71,54"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+
+    <!-- 同步环：左下四分之一弧（顺时针向上） -->
+    <path
+        android:pathData="M 54,71 A 17,17 0 0 1 37,54"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+
+    <!-- 右侧箭头（指向下） -->
+    <path
+        android:pathData="M 71,61 L 66.7,53.8 L 75.3,53.8 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- 左侧箭头（指向上） -->
+    <path
+        android:pathData="M 37,47 L 32.7,54.2 L 41.3,54.2 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- 心率折线 -->
+    <path
+        android:pathData="M 42.5,54 H 49 L 52.5,45.5 L 57.5,63 L 61,54.5 H 65.5"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
