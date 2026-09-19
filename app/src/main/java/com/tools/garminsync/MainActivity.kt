@@ -13,6 +13,7 @@ import com.tools.garminsync.ui.theme.GarminSyncTheme
 import com.tools.garminsync.ui.HomeScreen
 import com.tools.garminsync.ui.LoginScreen
 import com.tools.garminsync.ui.MainViewModel
+import com.tools.garminsync.update.UpdateFlow
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,4 +46,7 @@ private fun App() {
     } else {
         HomeScreen(state = state, vm = vm)
     }
+
+    // 应用内更新检测（24h 节流，失败静默）
+    UpdateFlow()
 }
