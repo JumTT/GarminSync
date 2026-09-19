@@ -227,6 +227,18 @@ class GarminClient(private val region: Region) {
         }
     }
 
+    /** 按日期下载健康数据 ZIP（含当日步数/睡眠/HRV/压力等 UCS 文件） */
+    fun downloadWellnessZip(date: String, destFile: File) {
+        authorized { token ->
+            Request.Builder()
+                .url("${region.api}/download-service/files/wellness/$date")
+                .header("Authorization", "Bearer $token")
+                .build()
+        }.use { resp ->
+            destFile.outputStream().use { out -> resp.body!!.byteStream().copyTo(out) }
+        }
+    }
+
     fun uploadFit(file: File): UploadResult {
         val mt = "application/octet-stream".toMediaType()
         fun buildRequest(token: String): Request {

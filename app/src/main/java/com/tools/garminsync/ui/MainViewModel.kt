@@ -11,12 +11,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 enum class RegionState { CHECKING, OK, NEED_LOGIN }
 enum class UploadUi { IDLE, WAITING, UPLOADING, SUCCESS, DUPLICATE, FAILED }
 
 data class ActivityUi(
     val act: GarminActivity,
+    val syncedStatus: String?, // null | "SUCCESS" | "DUPLICATE"（来自本地去重表）
+    val checked: Boolean,
+    val uploadState: UploadUi,
+    val error: String?,
+)
+
+data class WellnessUi(
+    val date: String,          // "yyyy-MM-dd"
+    val fileCount: Int?,       // 本地记录的文件数（未同步为 null）
     val syncedStatus: String?, // null | "SUCCESS" | "DUPLICATE"（来自本地去重表）
     val checked: Boolean,
     val uploadState: UploadUi,
@@ -39,6 +49,12 @@ data class UiState(
     val uploading: Boolean = false,
     val uploadDone: Int = 0,
     val uploadTotal: Int = 0,
+    val wellness: List<WellnessUi> = emptyList(),
+    val wellnessError: String? = null,
+    val wellnessLoadingMore: Boolean = false,
+    val wellnessUploading: Boolean = false,
+    val wellnessDone: Int = 0,
+    val wellnessTotal: Int = 0,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -49,6 +65,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 当前已加载的活动条数（分页游标） */
     private var loadedCount = 0
+
+    /** 当前已加载的健康数据天数（分页游标，含今天） */
+    private var loadedWellnessDays = 0
 
     init {
         recheck()
@@ -76,7 +95,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     loginError = if (!cn.ok) cn.error else if (!global.ok) global.error else null,
                 )
             }
-            if (cn.ok && global.ok) loadActivities()
+            if (cn.ok && global.ok) {
+                loadActivities()
+                loadWellness()
+            }
         }
     }
 
@@ -117,6 +139,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     if (_ui.value.cnState == RegionState.OK && _ui.value.globalState == RegionState.OK) {
                         loadActivities()
+                        loadWellness()
                     }
                 }
                 .onFailure { e ->
@@ -225,7 +248,103 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
+    // ---------------- 健康数据（状态机与活动完全一致） ----------------
+
+    /** 生成最近 N 天日期列表并读取本地同步状态（首屏/上传后/登录后调用） */
+    private suspend fun loadWellness(extend: Boolean = false) {
+        val days = if (extend) loadedWellnessDays + WELLNESS_RECENT_LIMIT
+        else maxOf(loadedWellnessDays, WELLNESS_RECENT_LIMIT)
+        val dates = (0 until days).map { LocalDate.now().minusDays(it.toLong()).toString() }
+        runCatching { repo.fetchWellnessStatus(dates) }
+            .onSuccess { fetched ->
+                loadedWellnessDays = days
+                _ui.update { s ->
+                    val prev = s.wellness.associateBy { it.date }
+                    val mapped = fetched.map { ws ->
+                        val old = prev[ws.date]
+                        // 上传成功/重复后自动取消勾选，避免误触强制重传
+                        val oldChecked = old?.let {
+                            if (it.uploadState == UploadUi.SUCCESS || it.uploadState == UploadUi.DUPLICATE) false
+                            else it.checked
+                        }
+                        WellnessUi(
+                            date = ws.date,
+                            fileCount = ws.fileCount,
+                            syncedStatus = ws.syncedStatus,
+                            // 默认全部勾选；已上传过的默认不勾选（勾选即强制重传）
+                            checked = oldChecked ?: (ws.syncedStatus == null),
+                            uploadState = old?.uploadState ?: UploadUi.IDLE,
+                            error = old?.error,
+                        )
+                    }
+                    s.copy(wellnessError = null, wellness = mapped)
+                }
+            }
+            .onFailure { e ->
+                _ui.update { it.copy(wellnessLoadingMore = false, wellnessError = e.message ?: "读取健康数据状态失败") }
+            }
+    }
+
+    /** 加载更多：日期窗口向前扩展一页 */
+    fun loadWellnessMore() {
+        if (_ui.value.wellnessLoadingMore) return
+        viewModelScope.launch {
+            _ui.update { it.copy(wellnessLoadingMore = true) }
+            loadWellness(extend = true)
+            _ui.update { it.copy(wellnessLoadingMore = false) }
+        }
+    }
+
+    fun toggleWellness(date: String) = _ui.update { s ->
+        s.copy(wellness = s.wellness.map {
+            if (it.date == date) it.copy(checked = !it.checked) else it
+        })
+    }
+
+    fun toggleAllWellness(checked: Boolean) = _ui.update { s ->
+        s.copy(wellness = s.wellness.map { it.copy(checked = checked) })
+    }
+
+    fun uploadWellnessSelected() {
+        if (_ui.value.wellnessUploading) return
+        viewModelScope.launch {
+            val targets = _ui.value.wellness.filter { it.checked }
+            if (targets.isEmpty()) return@launch
+            _ui.update { it.copy(wellnessUploading = true, wellnessDone = 0, wellnessTotal = targets.size) }
+            targets.forEach { t ->
+                setWellnessUpload(t.date) { it.copy(uploadState = UploadUi.WAITING, error = null) }
+            }
+
+            var done = 0
+            for (t in targets) {
+                setWellnessUpload(t.date) { it.copy(uploadState = UploadUi.UPLOADING) }
+                val result: Pair<UploadUi, String?> = try {
+                    when (repo.uploadWellness(t.date, force = t.syncedStatus != null)) {
+                        SyncOutcome.SUCCESS -> UploadUi.SUCCESS to null
+                        SyncOutcome.DUPLICATE -> UploadUi.DUPLICATE to null
+                        SyncOutcome.SKIPPED -> UploadUi.IDLE to "已上传过，未勾选强制重传"
+                    }
+                } catch (e: Exception) {
+                    UploadUi.FAILED to (e.message ?: "上传失败")
+                }
+                setWellnessUpload(t.date) { it.copy(uploadState = result.first, error = result.second) }
+                done++
+                _ui.update { it.copy(wellnessDone = done) }
+            }
+
+            _ui.update { it.copy(wellnessUploading = false) }
+            loadWellness() // 刷新已上传标注
+        }
+    }
+
+    private fun setWellnessUpload(date: String, transform: (WellnessUi) -> WellnessUi) = _ui.update { s ->
+        s.copy(wellness = s.wellness.map {
+            if (it.date == date) transform(it) else it
+        })
+    }
+
     companion object {
         const val RECENT_LIMIT = 10
+        const val WELLNESS_RECENT_LIMIT = 10
     }
 }

@@ -9,6 +9,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * 账号表：region = "CN" | "GLOBAL"
@@ -37,6 +39,18 @@ data class SyncedActivityEntity(
     val uploadedAt: Long,
 )
 
+/**
+ * 已同步健康数据表：唯一 ID = 日期（yyyy-MM-dd）
+ * status = "SUCCESS"（上传成功）| "DUPLICATE"（服务器判定已存在）
+ */
+@Entity(tableName = "synced_wellness")
+data class SyncedWellnessEntity(
+    @PrimaryKey val date: String,
+    val status: String,
+    val fileCount: Int,
+    val uploadedAt: Long,
+)
+
 @Dao
 interface AccountDao {
     @Query("SELECT * FROM accounts WHERE region = :region")
@@ -44,6 +58,15 @@ interface AccountDao {
 
     @Upsert
     suspend fun upsert(account: AccountEntity)
+}
+
+@Dao
+interface WellnessDao {
+    @Query("SELECT * FROM synced_wellness WHERE date = :date")
+    suspend fun get(date: String): SyncedWellnessEntity?
+
+    @Upsert
+    suspend fun upsert(entity: SyncedWellnessEntity)
 }
 
 @Dao
@@ -59,17 +82,31 @@ interface SyncedDao {
 }
 
 @Database(
-    entities = [AccountEntity::class, SyncedActivityEntity::class],
-    version = 1,
+    entities = [AccountEntity::class, SyncedActivityEntity::class, SyncedWellnessEntity::class],
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
     abstract fun syncedDao(): SyncedDao
+    abstract fun wellnessDao(): WellnessDao
 
     companion object {
         @Volatile
         private var instance: AppDatabase? = null
+
+        /** v2: 新增 synced_wellness 表（保留账号与活动同步记录） */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS synced_wellness (" +
+                        "date TEXT NOT NULL PRIMARY KEY, " +
+                        "status TEXT NOT NULL, " +
+                        "fileCount INTEGER NOT NULL, " +
+                        "uploadedAt INTEGER NOT NULL)",
+                )
+            }
+        }
 
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
@@ -77,7 +114,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "garmin_sync.db",
-                ).build().also { instance = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build().also { instance = it }
             }
     }
 }

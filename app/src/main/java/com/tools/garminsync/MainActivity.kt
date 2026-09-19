@@ -31,10 +31,10 @@ private fun App() {
     val vm: MainViewModel = viewModel()
     val state by vm.uiState.collectAsState()
 
-    // 上传期间保持屏幕常亮
+    // 上传期间保持屏幕常亮（活动与健康数据任一在上传即生效）
     val view = LocalView.current
-    LaunchedEffect(state.uploading) {
-        view.keepScreenOn = state.uploading
+    LaunchedEffect(state.uploading, state.wellnessUploading) {
+        view.keepScreenOn = state.uploading || state.wellnessUploading
     }
 
     if (state.loginRegion != null) {

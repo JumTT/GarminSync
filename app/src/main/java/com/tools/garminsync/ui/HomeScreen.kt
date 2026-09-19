@@ -27,9 +27,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,6 +50,8 @@ private val DupAmber = Color(0xFFF9A825)
 @Composable
 fun HomeScreen(state: UiState, vm: MainViewModel) {
     val checkedCount = state.activities.count { it.checked }
+    val wellnessCheckedCount = state.wellness.count { it.checked }
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -55,7 +63,7 @@ fun HomeScreen(state: UiState, vm: MainViewModel) {
             Text("GarminSync", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             IconButton(
                 onClick = { vm.recheck() },
-                enabled = !state.loading && !state.uploading,
+                enabled = !state.loading && !state.uploading && !state.wellnessUploading,
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = "刷新")
             }
@@ -85,41 +93,84 @@ fun HomeScreen(state: UiState, vm: MainViewModel) {
         if (state.loading) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        state.globalError?.let {
-            Text(
-                "拉取活动列表失败：$it",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
+
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("活动") })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("健康数据") })
         }
 
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            items(state.activities, key = { it.act.activityId }) { item ->
-                ActivityCard(item, enabled = !state.uploading, onToggle = { vm.toggle(item.act.activityId) })
+        if (selectedTab == 0) {
+            state.globalError?.let {
+                Text(
+                    "拉取活动列表失败：$it",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
-            // 列表为空时不生成该项，否则它会成为滚动锚点，数据填充后列表会跳到最底部
-            if (state.activities.isNotEmpty()) {
-                item(key = "load_more") {
-                    LoadMoreButton(
-                        loading = state.loadingMore,
-                        visible = state.cnState == RegionState.OK && state.globalState == RegionState.OK,
-                        enabled = !state.uploading && !state.loading && !state.loadingMore,
-                        onClick = { vm.loadMore() },
-                    )
+
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                items(state.activities, key = { it.act.activityId }) { item ->
+                    ActivityCard(item, enabled = !state.uploading, onToggle = { vm.toggle(item.act.activityId) })
+                }
+                // 列表为空时不生成该项，否则它会成为滚动锚点，数据填充后列表会跳到最底部
+                if (state.activities.isNotEmpty()) {
+                    item(key = "load_more") {
+                        LoadMoreButton(
+                            loading = state.loadingMore,
+                            visible = state.cnState == RegionState.OK && state.globalState == RegionState.OK,
+                            enabled = !state.uploading && !state.loading && !state.loadingMore,
+                            onClick = { vm.loadMore() },
+                        )
+                    }
                 }
             }
-        }
 
-        UploadBar(
-            uploading = state.uploading,
-            done = state.uploadDone,
-            total = state.uploadTotal,
-            checkedCount = checkedCount,
-            anyUnchecked = state.activities.any { !it.checked },
-            onUpload = { vm.uploadSelected() },
-            onToggleAll = { vm.toggleAll(it) },
-        )
+            UploadBar(
+                uploading = state.uploading,
+                done = state.uploadDone,
+                total = state.uploadTotal,
+                checkedCount = checkedCount,
+                anyUnchecked = state.activities.any { !it.checked },
+                onUpload = { vm.uploadSelected() },
+                onToggleAll = { vm.toggleAll(it) },
+            )
+        } else {
+            state.wellnessError?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                items(state.wellness, key = { it.date }) { item ->
+                    WellnessCard(item, enabled = !state.wellnessUploading, onToggle = { vm.toggleWellness(item.date) })
+                }
+                if (state.wellness.isNotEmpty()) {
+                    item(key = "load_more") {
+                        LoadMoreButton(
+                            loading = state.wellnessLoadingMore,
+                            visible = state.cnState == RegionState.OK && state.globalState == RegionState.OK,
+                            enabled = !state.wellnessUploading && !state.wellnessLoadingMore,
+                            onClick = { vm.loadWellnessMore() },
+                        )
+                    }
+                }
+            }
+
+            UploadBar(
+                uploading = state.wellnessUploading,
+                done = state.wellnessDone,
+                total = state.wellnessTotal,
+                checkedCount = wellnessCheckedCount,
+                anyUnchecked = state.wellness.any { !it.checked },
+                onUpload = { vm.uploadWellnessSelected() },
+                onToggleAll = { vm.toggleAllWellness(it) },
+            )
+        }
     }
 }
 
@@ -192,6 +243,59 @@ private fun ActivityCard(item: ActivityUi, enabled: Boolean, onToggle: () -> Uni
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    when (item.syncedStatus) {
+                        "SUCCESS" -> Badge("已上传", OkGreen)
+                        "DUPLICATE" -> Badge("服务器已存在", DupAmber, Color.Black)
+                    }
+                    when (item.uploadState) {
+                        UploadUi.WAITING -> Badge("排队中", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+                        UploadUi.UPLOADING -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(4.dp))
+                            Text("上传中…", style = MaterialTheme.typography.labelSmall)
+                        }
+                        UploadUi.SUCCESS -> Badge("上传成功", OkGreen)
+                        UploadUi.DUPLICATE -> Badge("重复（服务器已存在）", DupAmber, Color.Black)
+                        else -> {}
+                    }
+                }
+                item.error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WellnessCard(item: WellnessUi, enabled: Boolean, onToggle: () -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = item.checked, onCheckedChange = { onToggle() }, enabled = enabled)
+            Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
+                Text(
+                    item.date,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                item.fileCount?.let {
+                    Text(
+                        "$it 个文件",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     when (item.syncedStatus) {
