@@ -178,6 +178,13 @@ class SyncRepository(context: Context) {
             }
         }
 
+    /** 已知国区上传错误 -> 可读提示；未知错误保留原始报文（参考实现 README 的 419 说明） */
+    private fun wellnessErrorHint(message: String): String = when {
+        message.startsWith("HTTP 419") || message.contains("Wellness device is not active") ->
+            "国区账号未激活健康数据（HTTP 419）：请先在国区账号绑定一台支持健康数据的 Garmin 设备，并登录一次 Garmin Connect 完成初始化"
+        else -> message
+    }
+
     /**
      * 健康数据同步：下载国际区当日 wellness ZIP -> 解压全部 .fit -> 逐个上传国区 -> 落库
      * 状态规则与活动完全一致：本地已有记录且未强制时 SKIPPED；
@@ -213,10 +220,13 @@ class SyncRepository(context: Context) {
                         is UploadResult.Duplicate -> duplicated++
                         is UploadResult.Failed ->
                             // Garmin 有时通过报文而非 409 状态码表达重复（与参考实现对齐）
-                            if (result.message.contains("Duplicate Wellness File") || result.message.contains("(409)")) {
+                            if (result.message.contains("HTTP 409") ||
+                                result.message.contains("ERROR: (409)") ||
+                                result.message.contains("Duplicate Wellness File")
+                            ) {
                                 duplicated++
                             } else {
-                                throw RuntimeException(result.message)
+                                throw RuntimeException(wellnessErrorHint(result.message))
                             }
                     }
                     if (i < fits.lastIndex) delay(500) // 逐文件间隔，避免连发限流（与参考实现一致）
