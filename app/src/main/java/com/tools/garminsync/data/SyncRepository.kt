@@ -149,7 +149,13 @@ class SyncRepository(context: Context) {
                         record(act, "DUPLICATE")
                         SyncOutcome.DUPLICATE
                     }
-                    is UploadResult.Failed -> throw RuntimeException(result.message)
+                    is UploadResult.Failed ->
+                        if (isDuplicateMessage(result.message)) {
+                            record(act, "DUPLICATE")
+                            SyncOutcome.DUPLICATE
+                        } else {
+                            throw RuntimeException(result.message)
+                        }
                 }
             } finally {
                 zip.delete()
@@ -185,6 +191,13 @@ class SyncRepository(context: Context) {
         else -> message
     }
 
+    /** Garmin 有时通过报文而非 409 状态码表达重复（与参考实现对齐，活动/健康共用） */
+    private fun isDuplicateMessage(message: String): Boolean =
+        message.contains("HTTP 409") ||
+            message.contains("ERROR: (409)") ||
+            message.contains("Duplicate Activity") ||
+            message.contains("Duplicate Wellness File")
+
     /**
      * 健康数据同步：下载国际区当日 wellness ZIP -> 解压全部 .fit -> 逐个上传国区 -> 落库
      * 状态规则与活动完全一致：本地已有记录且未强制时 SKIPPED；
@@ -219,11 +232,7 @@ class SyncRepository(context: Context) {
                         is UploadResult.Success -> uploaded++
                         is UploadResult.Duplicate -> duplicated++
                         is UploadResult.Failed ->
-                            // Garmin 有时通过报文而非 409 状态码表达重复（与参考实现对齐）
-                            if (result.message.contains("HTTP 409") ||
-                                result.message.contains("ERROR: (409)") ||
-                                result.message.contains("Duplicate Wellness File")
-                            ) {
+                            if (isDuplicateMessage(result.message)) {
                                 duplicated++
                             } else {
                                 throw RuntimeException(wellnessErrorHint(result.message))
