@@ -1,5 +1,7 @@
 package com.tools.garminsync.ui
 
+import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -261,15 +266,7 @@ private fun ActivityCard(item: ActivityUi, enabled: Boolean, onToggle: () -> Uni
                         else -> {}
                     }
                 }
-                item.error?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                item.error?.let { CopyableErrorText(it) }
             }
         }
     }
@@ -314,15 +311,7 @@ private fun WellnessCard(item: WellnessUi, enabled: Boolean, onToggle: () -> Uni
                         else -> {}
                     }
                 }
-                item.error?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                item.error?.let { CopyableErrorText(it) }
             }
         }
     }
@@ -352,6 +341,24 @@ private fun Badge(text: String, bg: Color, fg: Color = Color.White) {
             color = fg,
         )
     }
+}
+
+/** 错误信息：样式与普通文本一致，点击整段复制到剪贴板（便于排查） */
+@Composable
+private fun CopyableErrorText(text: String) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    Text(
+        text,
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.clickable {
+            clipboard.setText(AnnotatedString(text))
+            Toast.makeText(context, "错误信息已复制", Toast.LENGTH_SHORT).show()
+        },
+    )
 }
 
 @Composable

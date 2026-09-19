@@ -227,18 +227,20 @@ class SyncRepository(context: Context) {
 
                 var uploaded = 0
                 var duplicated = 0
+                val failures = mutableListOf<String>() // "文件名：错误提示"
                 for ((i, fit) in fits.withIndex()) {
                     when (val result = cn.uploadFit(fit)) {
                         is UploadResult.Success -> uploaded++
                         is UploadResult.Duplicate -> duplicated++
                         is UploadResult.Failed ->
-                            if (isDuplicateMessage(result.message)) {
-                                duplicated++
-                            } else {
-                                throw RuntimeException(wellnessErrorHint(result.message))
-                            }
+                            if (isDuplicateMessage(result.message)) duplicated++
+                            else failures += "${fit.name}：${wellnessErrorHint(result.message)}"
                     }
                     if (i < fits.lastIndex) delay(500) // 逐文件间隔，避免连发限流（与参考实现一致）
+                }
+                if (failures.isNotEmpty()) {
+                    // 与参考实现一致：单个文件失败不中止整天，跳过继续传其余文件，最后汇总（已上传的重试时按 409 幂等去重）
+                    throw RuntimeException("${failures.size}/${fits.size} 个文件上传失败：${failures.joinToString("；")}")
                 }
 
                 val status = if (uploaded > 0) "SUCCESS" else "DUPLICATE"
